@@ -1,64 +1,50 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::fs;
 use home::home_dir;
-use sqlx::{migrate::MigrateDatabase, FromRow, Row, Sqlite, SqlitePool};
+use sqlx::{FromRow, migrate::MigrateDatabase, Sqlite, SqlitePool};
+use tauri::State;
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+struct Database(SqlitePool);
+
+#[derive(Clone, FromRow, Debug, serde::Serialize)]
+struct Set {
+    id: i32,
+    name: String,
+    category: i32,
 }
 
-#[derive(Clone, FromRow, Debug)]
-struct User {
-    id: i64,
-    name: String,
+#[tauri::command]
+async fn get_sets<'a>(page: i32, size: i32, db: State<'a, Database>) -> Result<Vec<Set>, String> {
+    return sqlx::query_as::<_, Set>(
+        &format!("SELECT * FROM bricklink_sets OFFSET {} LIMIT {};", page, size)
+    ).fetch_all(&db.0).await.map_err(|e| e.to_string());
 }
 
 #[tokio::main]
 async fn main() {
-    let db_url: String;
-    match home_dir() {
-        Some(path) => {
-            db_url = format!("sqlite://{}/.brickvault/items.db", path.display());
-        },
-        None => panic!("Could not find home directory!"),
-    }
+    let home_dir = home_dir().unwrap();
+    let brickops_dir = format!("{}/.brickops", home_dir.display());
+    let db_url = format!("sqlite://{}/items.db", brickops_dir);
 
-    if !Sqlite::database_exists(&db_url).await.unwrap_or(false) {
-        println!("Creating database {}", db_url);
-        match Sqlite::create_database(&db_url).await {
-            Ok(_) => println!("[Brickvault] Database created successfully!"),
-            Err(error) => panic!("error: {}", error),
-        }
-    }
+    fs::create_dir_all(&brickops_dir)
+        .unwrap_or_else(|e| {
+            panic!("Failed to create directory {}: {}", brickops_dir, e)
+        });
+
+    Sqlite::create_database(&db_url).await.unwrap_or_else(|e| {
+        panic!("Failed to create database {}: {}", db_url, e)
+    });
 
     let db = SqlitePool::connect(&db_url).await.unwrap();
 
-    let migration_results = sqlx::migrate!().run(&db).await;
-
-    match migration_results {
-        Ok(_) => println!("Migration success"),
-        Err(error) => {
-            panic!("error: {}", error);
-        }
-    }
-    println!("migration: {:?}", migration_results);
-
-    let result = sqlx::query(
-        "SELECT name
-         FROM sqlite_schema
-         WHERE type ='table'
-         AND name NOT LIKE 'sqlite_%';",
-    )
-        .fetch_all(&db)
-        .await
-        .unwrap();
-    for (idx, row) in result.iter().enumerate() {
-        println!("[{}]: {:?}", idx, row.get::<String, &str>("name"));
-    }
+    sqlx::migrate!().run(&db).await.unwrap_or_else(|e| {
+        panic!("Failed to run migrations: {}", e)
+    });
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![greet])
+        .manage(Database(db))
+        .invoke_handler(tauri::generate_handler![get_sets])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
