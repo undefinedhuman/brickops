@@ -8,6 +8,7 @@ const router = createRouter({
       name: "home",
       component: () => import("@/views/HomeView.vue"),
       meta: {
+        displayName: "Dashboard",
         layout: "BaseLayout",
         requiresAuth: true
       }
@@ -17,6 +18,7 @@ const router = createRouter({
       name: "sets",
       component: () => import("@/views/SetsView.vue"),
       meta: {
+        displayName: "Sets",
         layout: "BaseLayout",
         requiresAuth: true
       }
@@ -26,6 +28,7 @@ const router = createRouter({
       name: "settings",
       component: () => import("@/views/SettingsView.vue"),
       meta: {
+        displayName: "Settings",
         layout: "BaseLayout",
         requiresAuth: true
       }
